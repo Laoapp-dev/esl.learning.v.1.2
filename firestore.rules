@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Vocabulary: anyone can read (the app needs this to show words to all
+    // learners), but nobody can write from the browser. Writes only happen
+    // from the admin script using a Firebase Admin SDK service account,
+    // which bypasses these rules entirely (admin access is not subject to
+    // security rules).
+    match /vocabulary/{wordId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
