@@ -78,3 +78,89 @@ Reviewed all categories generated from the word list and cleaned them up:
   it, so Categories/Level Journey/Flashcards etc. are all useful to browse.
 - All 5,483 words are still present — this only touched the `category`
   field and the 15 corrupted rows' text, not word count.
+
+## 4. This update: clean app + real import system + 16-category word list
+
+**App is now clean by default.** `src/data/defaultVocabulary.json` is an
+empty array — the app no longer bundles or auto-loads any word list, and
+the risky first-login "merge 5,483 words into localStorage" step from the
+previous update is fully removed. This was the most likely cause of the
+error screen on open, and removing it also shrank the production bundle
+significantly (precached assets dropped from ~3.3MB to ~1.8MB), which
+should make first load noticeably faster and more reliable on slow
+connections too.
+
+**Import system (already existed, now also handles JSON everywhere):**
+- **Admin Panel → Import/Export tab**: upload a `.csv` or `.json` file to
+  push words into the shared curriculum every learner sees. Supports up to
+  **20,000 words per file** (50MB) — comfortably over the 10,000-word
+  requirement. A "Push to All Learners" button syncs it to every device via
+  GitHub.
+- **Admin Panel → Google Sheet tab**: paste a published Google Sheet CSV
+  link (or an Apps Script URL) and sync directly — no file upload needed.
+- **My Words → Import/Export** (every learner): now also accepts `.json`
+  files, not just `.csv`/`.xlsx`/`.xls`, for personal word list imports.
+- **New: Admin Panel → Import/Export → Danger Zone → "Full Factory Reset &
+  Sign Out"**. This app doesn't use Firebase — everything (login session,
+  vocabulary, settings) lives only in the browser's own storage. This new
+  button clears ALL of it (localStorage, sessionStorage, IndexedDB, cached
+  files, the service worker) and signs out, exactly like a fresh install —
+  for when the app is stuck and nothing else has fixed it.
+
+**Category-organized starter word list (delivered separately, not
+bundled):** `esl_vocabulary_16categories_5517words.json` /
+`.csv` — the word list re-organized into exactly the 16 categories
+requested, ready to import via Admin Panel:
+
+- People, Family, & Relationships (325) · Time & Sequences (142) ·
+  Food & Drink (134) · Places & Locations (429) · Common Actions / Verbs
+  (1,061) · Body Parts & Health (329) · Money & Commerce (190) ·
+  Work, Study, & Technology (828) · Weather & Nature (258) ·
+  Describing People (1,181) · Agriculture & Farming (49) ·
+  Forestry & Land Management (29) · Environment & Ecology (113) ·
+  Climate & Atmospheric Dynamics (36) · Economy & Finance (111) ·
+  Policy & Governance (302)
+- **5,517 words total.** This is the accurate, verified word set from your
+  original file, re-categorized — not fabricated. Reaching 10,000+ with
+  the same accuracy (correct definitions AND correct Lao/Thai translations)
+  needs a larger source list; the import system itself already supports
+  20,000+ words whenever one is available, and the smaller Forestry/Climate
+  categories were hand-supplemented with ~50 additional verified English
+  entries so every one of the 16 categories has solid coverage.
+
+To load this into the app: Admin Panel → Import/Export → Import CSV/JSON →
+select `esl_vocabulary_16categories_5517words.json` → Push to All Learners.
+
+## 5. This update: Firebase fully removed + words loaded into the app
+
+**Firebase double-checked and fully removed.** The earlier check only
+searched `src/`, which is why these were missed — they're now deleted:
+- `firestore.rules` (orphaned Firestore security rules, unused by the app)
+- `scripts/import-excel-to-firestore.mjs` (orphaned admin script, not
+  referenced by any `package.json` script — dead code)
+- `VITE_FIREBASE_*` secrets removed from `.github/workflows/deploy.yml`
+  (they were being injected into the build but nothing in the app ever
+  read them)
+- `MIGRATION_GUIDE.md` rewritten to remove all Firebase/Firestore setup
+  instructions (which described files that were never actually built) and
+  accurately describe the two systems that really exist: GitHub Sync and
+  Google Sheet sync.
+- Confirmed: no `firebase` package.json dependency, no `.env` file with
+  Firebase keys, no Firebase imports anywhere in `src/`.
+
+**The 16-category word list is now loaded into the app.** 
+`src/data/defaultVocabulary.json` is restored — but now containing the
+5,517-word list organized into your 16 requested categories (not the old
+99-category set), so Categories, Flashcards, Quiz, Matching, and Spelling
+all have real content from first install.
+
+Seeded more carefully than the version that shipped before:
+- Loaded as its own ~294KB (gzipped) chunk, fetched only after login —
+  never part of the initial bundle.
+- Merged in **11 batches of 500 words** on a timer instead of one big
+  synchronous pass, so it can't block the UI.
+- Every batch is individually wrapped so one bad batch can only get
+  skipped — it can never take down the app.
+- Only runs the very first time a browser's shared curriculum is empty;
+  an admin's own CSV/JSON import or Google Sheet sync always takes
+  priority and is never overwritten.
