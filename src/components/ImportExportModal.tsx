@@ -108,13 +108,37 @@ export function ImportExportModal({ isOpen, onClose }: ImportExportModalProps) {
       }
 
       const isCsv = file.name.toLowerCase().endsWith('.csv');
+      const isJson = file.name.toLowerCase().endsWith('.json') || file.type === 'application/json';
       const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
-      if (!isCsv && !isExcel) {
-        addToast('Unsupported file type. Please upload a .csv, .xlsx, or .xls file.', 'error');
+      if (!isCsv && !isJson && !isExcel) {
+        addToast('Unsupported file type. Please upload a .csv, .json, .xlsx, or .xls file.', 'error');
         return;
       }
 
       setIsProcessing(true);
+
+      if (isJson) {
+        file.text().then(text => {
+          try {
+            const parsed = JSON.parse(text);
+            // Accept either a raw array of word objects, or a {words: [...]} wrapper.
+            const rows: unknown = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? (parsed as any).words : null);
+            if (!Array.isArray(rows)) {
+              setIsProcessing(false);
+              addToast('JSON must be an array of word objects, or {"words": [...]}', 'error');
+              return;
+            }
+            finishWithRows(rows as any[]);
+          } catch (error) {
+            setIsProcessing(false);
+            addToast(`Couldn't parse that JSON file: ${(error as Error).message || 'invalid JSON'}`, 'error');
+          }
+        }).catch((error) => {
+          setIsProcessing(false);
+          addToast(`Couldn't read that file: ${(error as Error).message || 'unknown error'}`, 'error');
+        });
+        return;
+      }
 
       if (isCsv) {
         // NOTE: we deliberately do NOT use Papa's `worker: true` option here.
@@ -334,13 +358,13 @@ export function ImportExportModal({ isOpen, onClose }: ImportExportModalProps) {
                         <>
                           <Upload className="mb-3 h-8 w-8 text-[#9B9BAE]" strokeWidth={1.5} />
                           <p className="text-sm font-medium text-[#1A1A2E]">Drop your file here or click to browse</p>
-                          <p className="mt-1 text-xs text-[#9B9BAE]">Supports CSV, XLSX, XLS (max 10MB)</p>
+                          <p className="mt-1 text-xs text-[#9B9BAE]">Supports CSV, JSON, XLSX, XLS — up to {MAX_IMPORT_ROWS.toLocaleString()} words ({MAX_IMPORT_FILE_BYTES / 1024 / 1024}MB)</p>
                         </>
                       )}
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".csv,.xlsx,.xls"
+                        accept=".csv,.json,application/json,.xlsx,.xls"
                         onChange={handleFileSelect}
                         disabled={isProcessing}
                         className="hidden"

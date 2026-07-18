@@ -105,48 +105,66 @@ function AppInner() {
 
   }, [isAuthenticated, currentUser?.id]); // eslint-disable-line
 
-  // Reset prevAuthRef when user logs out
-  useEffect(() => {
-    if (!isAuthenticated) prevAuthRef.current = false;
-  }, [isAuthenticated]);
-
-  // ── Seed the built-in ~5,500-word default vocabulary bank ────────────────
-  // Brand-new installs (and any browser that's had its shared curriculum
-  // cleared) start with an empty shared word list — the only words present
-  // are the handful of per-account sample words. That leaves flashcards,
-  // quiz, matching, spelling, and category browsing with almost nothing to
-  // actually work with until an admin manually configures a Google Sheet or
-  // GitHub sync. Fix: ship a real default curriculum (5,483 CEFR-tagged
-  // words with definitions, examples, synonyms/antonyms, categories, and
-  // Lao/Thai translations — src/data/defaultVocabulary.json) baked into the
-  // app itself, and seed it into the shared curriculum store the first time
-  // this browser has none.
+  // ── Seed the built-in word bank ───────────────────────────────────────────
+  // src/data/defaultVocabulary.json ships with a curated, CEFR-tagged
+  // starter curriculum organized into 16 topic categories (People/Family,
+  // Time & Sequences, Food & Drink, Places & Locations, Common Actions/
+  // Verbs, Body & Health, Money & Commerce, Work/Study/Technology, Weather
+  // & Nature, Describing People, Agriculture & Farming, Forestry & Land
+  // Management, Environment & Ecology, Climate & Atmospheric Dynamics,
+  // Economy & Finance, Policy & Governance) so every Category lesson has
+  // real words in it from the moment the app is installed — no admin setup
+  // required first. An admin's own CSV/JSON import or Google Sheet sync
+  // always takes priority: this only runs once, the very first time a
+  // browser's shared curriculum is empty, and never overwrites anything.
   //
-  // Dynamically imported (not a static import) so this ~1.6MB word list is
-  // its own separate chunk, fetched only after login and only when actually
-  // needed — it never becomes part of the initial bundle the browser has to
-  // download and parse before the app can even render, which would make
-  // first paint slower on exactly the slow connections most likely to hit
-  // the "still loading" boot-timeout screen in the first place.
-  //
-  // Uses mergeSharedWords (add-only), so it never overwrites or removes
-  // words an admin has already pushed via Sheet/GitHub sync, and never
-  // fires again once sharedWordCount is no longer 0.
+  // Loaded via a dynamic import (its own separate ~1.7MB chunk, fetched
+  // only after login) so it never becomes part of the initial bundle the
+  // browser has to download before the app can render — that keeps first
+  // paint fast even on slow connections. The merge itself is chunked into
+  // small batches on a timer (not one big synchronous pass) so it can
+  // never block the main thread long enough to feel like a freeze, and
+  // every step is wrapped so a failure here can only skip the seeding —
+  // it can never crash the app.
   useEffect(() => {
     if (!isAuthenticated) return;
     if (vocabulary.sharedWordCount > 0) return;
     let cancelled = false;
+
     import('@/data/defaultVocabulary.json')
       .then((mod) => {
         if (cancelled) return;
-        const seedWords = (mod as { default?: unknown }).default ?? mod;
-        if (Array.isArray(seedWords) && seedWords.length > 0) {
-          vocabulary.mergeSharedWords(seedWords as Partial<VocabularyWord>[], 'shared');
-        }
+        const all = ((mod as { default?: unknown }).default ?? mod) as unknown;
+        if (!Array.isArray(all) || all.length === 0) return;
+
+        const BATCH_SIZE = 500;
+        let i = 0;
+        const seedNextBatch = () => {
+          if (cancelled) return;
+          try {
+            const batch = all.slice(i, i + BATCH_SIZE);
+            if (batch.length > 0) {
+              vocabulary.mergeSharedWords(batch as Partial<VocabularyWord>[], 'shared');
+            }
+          } catch {
+            /* one bad batch should never stop the rest, or crash the app */
+          }
+          i += BATCH_SIZE;
+          if (i < all.length && !cancelled) {
+            setTimeout(seedNextBatch, 0);
+          }
+        };
+        seedNextBatch();
       })
-      .catch(() => {/* built-in word bank unavailable — non-fatal, app still works with manual words */});
+      .catch(() => {/* built-in word bank unavailable — non-fatal, app still works empty until an admin imports */});
+
     return () => { cancelled = true; };
   }, [isAuthenticated, vocabulary.sharedWordCount]); // eslint-disable-line
+
+  // Reset prevAuthRef when user logs out
+  useEffect(() => {
+    if (!isAuthenticated) prevAuthRef.current = false;
+  }, [isAuthenticated]);
 
   // ── Auto-sync shared vocabulary for EVERY user, automatically ────────────────
   // This is the piece that makes "admin syncs once → all users see it" actually
