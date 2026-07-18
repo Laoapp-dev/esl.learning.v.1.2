@@ -85,7 +85,7 @@ export function AdminPanel() {
   } | null>(null);
   const [showScriptHelp, setShowScriptHelp] = useState(false);
   const [pushingShared, setPushingShared] = useState(false);
-  const [resetConfirm, setResetConfirm] = useState<'shared' | 'all' | null>(null);
+  const [resetConfirm, setResetConfirm] = useState<'shared' | 'all' | 'factory' | null>(null);
   const [resetting, setResetting] = useState(false);
 
   const refreshUsers = useCallback(() => setUsers(getAllUsers()), [getAllUsers]);
@@ -335,6 +335,50 @@ export function AdminPanel() {
     setResetting(false);
     addToast(`🗑️ Removed ${removed} word${removed === 1 ? '' : 's'}.${ghMsg} Import a new CSV or sync a Google Sheet, then push to learners.`, 'success');
   };
+
+  // ── Full factory reset ────────────────────────────────────────────────────
+  // This app has no Firebase/external auth provider — everything (login
+  // session, vocabulary, progress, admin settings) lives in THIS browser's
+  // own storage. "Clear Firebase and auth" in practice means: wipe every
+  // trace of that local state, not just the vocabulary. Unlike the two
+  // resets above (which only ever touch word data and stay signed in),
+  // this clears localStorage, sessionStorage, IndexedDB, the Cache Storage
+  // used by the PWA service worker, and unregisters the service worker
+  // itself — including the current login session — then reloads to a
+  // completely clean, logged-out app, as if it were installed for the
+  // first time. Does not touch any other device or the GitHub backup.
+  const handleFactoryReset = async () => {
+    if (resetConfirm !== 'factory') {
+      setResetConfirm('factory');
+      setTimeout(() => setResetConfirm(prev => prev === 'factory' ? null : prev), 5000);
+      return;
+    }
+    setResetting(true);
+    try { localStorage.clear(); } catch { /* ignore */ }
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+    try {
+      if ('indexedDB' in window && (indexedDB as any).databases) {
+        const dbs = await (indexedDB as any).databases();
+        await Promise.all((dbs || []).map((db: { name?: string }) =>
+          db.name ? new Promise(res => { const req = indexedDB.deleteDatabase(db.name!); req.onsuccess = req.onerror = req.onblocked = () => res(null); }) : null
+        ));
+      }
+    } catch { /* ignore */ }
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch { /* ignore */ }
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch { /* ignore */ }
+    window.location.href = window.location.origin + window.location.pathname;
+  };
+
   const handleDownloadTemplate = () => {
     const header = 'word,definition,partOfSpeech,cefrLevel,exampleSentence,synonym,antonym,category,difficulty,laoTranslation,thaiTranslation\n';
     const rows = [
@@ -917,6 +961,26 @@ function doGet() {
                 }`}>
                 {resetting ? <Spinner/> : <Trash2 className="h-4 w-4"/>}
                 {resetConfirm === 'all' ? 'Click again to confirm reset' : 'Reset All Words on This Device'}
+              </button>
+            </div>
+
+            <div className="border-t border-red-100 dark:border-red-900 pt-4 space-y-2">
+              <p className="text-sm text-foreground font-medium">Full factory reset (clears login too)</p>
+              <p className="text-xs text-muted-foreground">
+                This app doesn't use Firebase or any external auth service — your login session,
+                vocabulary, progress, and admin settings all live in this browser only. This wipes
+                ALL of it (localStorage, IndexedDB, cached files, the service worker) and signs you
+                out, exactly like a fresh install. Use this if the app is stuck or behaving oddly and
+                nothing else has fixed it. Does not affect other devices or your GitHub backup.
+              </p>
+              <button onClick={handleFactoryReset} disabled={resetting}
+                className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
+                  resetConfirm === 'factory'
+                    ? 'bg-red-600 text-white hover:bg-red-700'
+                    : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-100'
+                }`}>
+                {resetting ? <Spinner/> : <Trash2 className="h-4 w-4"/>}
+                {resetConfirm === 'factory' ? 'Click again to confirm — this signs you out' : 'Full Factory Reset & Sign Out'}
               </button>
             </div>
           </div>
