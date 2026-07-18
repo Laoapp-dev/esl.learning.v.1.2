@@ -56,3 +56,25 @@ normalized from the supplied `7000_ESL_Learning.json` (actually a CSV):
 Same as before — push this to your `esl.learning` repo's `main` branch (or
 wherever your GitHub Actions Pages workflow builds from). No new secrets or
 config needed for the word bank; it's baked into the build.
+
+## 3. Category cleanup (this update)
+
+Reviewed all categories generated from the word list and cleaned them up:
+
+- **175 → 99 categories.** Merged naming inconsistencies from the source
+  file (e.g. "Political" + "Politics" → **Politics**; "Economics" +
+  "Economy" → **Economy**; "Flower"/"Flowers" → **Nature**; "House" →
+  **Home**), and folded ~50 one-off categories that only existed because a
+  single idiomatic phrase (e.g. "bank on", "grow apart", "wrestle with")
+  had been given its own unique category name into one real, useful
+  category: **Phrasal Verbs & Idioms** (48 entries).
+- **Fixed 15 words with corrupted source data** (comma inside a field had
+  shifted every column after it) so their definition, example, category,
+  etc. are all correct instead of garbled: million, conservation,
+  livestock, boutique, cay, desert, fjord, besides, delegate, otherwise,
+  so, therefore, unlike, archipelago.
+- **0 uncategorized words** (was 2) and **0 singleton categories** (was 15+)
+  — every one of the 99 categories now has a meaningful number of words in
+  it, so Categories/Level Journey/Flashcards etc. are all useful to browse.
+- All 5,483 words are still present — this only touched the `category`
+  field and the 15 corrupted rows' text, not word count.
