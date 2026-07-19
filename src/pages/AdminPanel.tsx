@@ -6,7 +6,7 @@ import {
   Github, Settings2, AlertTriangle, Cloud,
   WifiOff, FileDown, FileUp, Crown, UserX, UserCheck, User,
   Link2, RefreshCw, CheckCircle2, Clock, Info, ExternalLink, Play,
-  Zap, ChevronDown, ChevronUp, Code2, Search, Sparkles,
+  Zap, Search, Sparkles,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useApp } from '@/App';
@@ -70,9 +70,7 @@ export function AdminPanel() {
   const [ghSyncing, setGhSyncing] = useState(false);
 
   // Google Sheet local form state (pre-save)
-  const [gsMode,     setGsMode]     = useState<'csv'|'script'>(gs.config.mode);
   const [gsCsvUrl,   setGsCsvUrl]   = useState(gs.config.csvUrl);
-  const [gsScript,   setGsScript]   = useState(gs.config.scriptUrl);
   const [gsInterval, setGsInterval] = useState(gs.config.autoIntervalMin);
   const [gsTestResult, setGsTestResult] = useState<{ok:boolean; count:number; msg:string}|null>(null);
   const [gsTesting, setGsTesting] = useState(false);
@@ -83,7 +81,6 @@ export function AdminPanel() {
     sheetDuplicates: { word: string; count: number }[];
     appDuplicates: { word: string; count: number; ids: string[] }[];
   } | null>(null);
-  const [showScriptHelp, setShowScriptHelp] = useState(false);
   const [pushingShared, setPushingShared] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<'shared' | 'all' | 'factory' | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -134,12 +131,12 @@ export function AdminPanel() {
   // ── Google Sheet actions ──────────────────────────────────────────────────────
   const handleTestGS = async () => {
     setGsTesting(true); setGsTestResult(null); gs.setError(null);
-    const r = await gs.testConnection({ mode:gsMode, csvUrl:gsCsvUrl, scriptUrl:gsScript });
+    const r = await gs.testConnection({ csvUrl:gsCsvUrl });
     setGsTestResult({ ok:r.success, count:r.count, msg: r.success ? `${r.count} words found` : (r.error??'Unknown error') });
     setGsTesting(false);
   };
   const handleSaveGS = () => {
-    gs.saveConfig({ mode:gsMode, csvUrl:gsCsvUrl, scriptUrl:gsScript, autoIntervalMin:gsInterval });
+    gs.saveConfig({ csvUrl:gsCsvUrl, autoIntervalMin:gsInterval });
     addToast('Google Sheet config saved','success');
   };
   const handleSyncGS = async () => {
@@ -159,7 +156,7 @@ export function AdminPanel() {
     setDupChecking(true);
     setDupReport(null);
     const appDuplicates = vocabulary.findDuplicateWords();
-    if (gs.config.csvUrl || gs.config.scriptUrl) {
+    if (gs.config.csvUrl) {
       const sheetResult = await gs.checkForDuplicates();
       setDupReport({
         sheetTotalRows: sheetResult.totalRows,
@@ -394,25 +391,6 @@ export function AdminPanel() {
     addToast('Template downloaded','success');
   };
 
-  // ── Apps Script code template ─────────────────────────────────────────────────
-  const APPS_SCRIPT_CODE = `// Paste this into Google Apps Script (script.google.com)
-// Then click Deploy → New deployment → Web App → Anyone
-function doGet() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data  = sheet.getDataRange().getValues();
-  const heads = data[0].map(String);
-  const words = data.slice(1)
-    .filter(row => row[0])          // skip empty rows
-    .map(row => {
-      const obj = {};
-      heads.forEach((h, i) => { obj[h] = String(row[i] ?? ''); });
-      return obj;
-    });
-  return ContentService
-    .createTextOutput(JSON.stringify({ words }))
-    .setMimeType(ContentService.MimeType.JSON);
-}`;
-
   // AI API Keys state (admin-only, stored under protected key)
   const loadAiCfg = () => { try { return JSON.parse(localStorage.getItem(ADMIN_API_KEYS_KEY) || '{}'); } catch { return {}; } };
   const [aiGoogleKey,      setAiGoogleKey]      = useState<string>(() => loadAiCfg().google      || '');
@@ -529,110 +507,47 @@ function doGet() {
               <div className="flex-1">
                 <span className="font-semibold">Last synced:</span> {new Date(gs.config.lastSyncAt).toLocaleString()} — {gs.config.lastSyncCount} words loaded on this device
               </div>
-              <button onClick={handleSyncGS} disabled={gs.syncing||(!gs.config.csvUrl&&!gs.config.scriptUrl)} className="flex items-center gap-1 text-xs font-semibold text-green-700 hover:text-green-900 shrink-0">
+              <button onClick={handleSyncGS} disabled={gs.syncing||!gs.config.csvUrl} className="flex items-center gap-1 text-xs font-semibold text-green-700 hover:text-green-900 shrink-0">
                 {gs.syncing?<Spinner/>:<RefreshCw className="h-3.5 w-3.5"/>} Sync Now
               </button>
             </SuccessBox>
           )}
 
-          {/* Mode toggle */}
+          {/* Replace-the-wordlist workflow guide */}
+          <InfoBox>
+            <Info className="h-4 w-4 shrink-0 mt-0.5"/>
+            <div>
+              <strong>Replacing the whole wordlist?</strong> Do it in this order: 1) below, connect
+              your Google Sheet link and paste the new list's rows into it (or update the existing
+              sheet) 2) <strong>Sync from Google Sheet Now</strong> to pull it into this device
+              3) <strong>Push to All Learners</strong> to update everyone's app via GitHub. If the old
+              words shouldn't linger alongside the new ones, use <strong>Reset Curriculum
+              Vocabulary</strong> in the Danger Zone (Import/Export tab) first — it clears both this
+              device and the GitHub copy so nothing old can get pulled back in.
+            </div>
+          </InfoBox>
+
+          {/* Google Sheet link */}
           <div className="bg-card rounded-xl border border-border p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Link2 className="h-5 w-5 text-[#F5A623]"/>
-              <h2 className="font-semibold text-foreground">Connection Method</h2>
+              <h2 className="font-semibold text-foreground">Google Sheet Link</h2>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setGsMode('csv')}
-                className={`py-3 px-4 rounded-xl text-sm font-medium border-2 transition-all ${gsMode==='csv'?'border-[#F5A623] bg-[#F5A623]/10 text-foreground':'border-border text-muted-foreground hover:border-[#F5A623]/40'}`}>
-                <div className="text-xl mb-1">📊</div>
-                <div className="font-semibold">Published CSV</div>
-                <div className="text-xs mt-0.5 opacity-70">Simple — no code needed</div>
-              </button>
-              <button onClick={() => setGsMode('script')}
-                className={`py-3 px-4 rounded-xl text-sm font-medium border-2 transition-all ${gsMode==='script'?'border-[#4A90E2] bg-[#4A90E2]/10 text-foreground':'border-border text-muted-foreground hover:border-[#4A90E2]/40'}`}>
-                <div className="text-xl mb-1">⚙️</div>
-                <div className="font-semibold">Apps Script</div>
-                <div className="text-xs mt-0.5 opacity-70">More control + real-time</div>
-              </button>
-            </div>
+            <InfoBox>
+              <Info className="h-4 w-4 shrink-0 mt-0.5"/>
+              <div>
+                <strong>How to get the URL:</strong> In Google Sheets → File → Share → <strong>Publish to web</strong> → choose your sheet tab → choose <strong>CSV</strong> → click Publish → copy the link. Or just paste any <code className="bg-blue-100 px-1 rounded">/edit</code> URL — we auto-convert it.
+              </div>
+            </InfoBox>
+            <Field label="Published CSV URL" note="Paste the published CSV link or any Google Sheets /edit URL">
+              <Input type="url" value={gsCsvUrl} onChange={e=>{setGsCsvUrl(e.target.value);setGsTestResult(null);}} placeholder="https://docs.google.com/spreadsheets/d/…/pub?output=csv"/>
+            </Field>
+            {gsCsvUrl && (
+              <p className="text-xs text-muted-foreground break-all">
+                Will use: <span className="text-foreground font-mono">{toCsvUrl(gsCsvUrl)}</span>
+              </p>
+            )}
           </div>
-
-          {/* CSV mode */}
-          {gsMode === 'csv' && (
-            <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-              <InfoBox>
-                <Info className="h-4 w-4 shrink-0 mt-0.5"/>
-                <div>
-                  <strong>How to get the URL:</strong> In Google Sheets → File → Share → <strong>Publish to web</strong> → choose your sheet tab → choose <strong>CSV</strong> → click Publish → copy the link. Or just paste any <code className="bg-blue-100 px-1 rounded">/edit</code> URL — we auto-convert it.
-                </div>
-              </InfoBox>
-              <Field label="Published CSV URL" note="Paste the published CSV link or any Google Sheets /edit URL">
-                <Input type="url" value={gsCsvUrl} onChange={e=>{setGsCsvUrl(e.target.value);setGsTestResult(null);}} placeholder="https://docs.google.com/spreadsheets/d/…/pub?output=csv"/>
-              </Field>
-              {gsCsvUrl && (
-                <p className="text-xs text-muted-foreground break-all">
-                  Will use: <span className="text-foreground font-mono">{toCsvUrl(gsCsvUrl)}</span>
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Script mode */}
-          {gsMode === 'script' && (
-            <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-              <InfoBox>
-                <Info className="h-4 w-4 shrink-0 mt-0.5"/>
-                <div>Deploy a Google Apps Script as a Web App. It returns your sheet data as JSON — works better for private sheets and gives you more control.
-                </div>
-              </InfoBox>
-              <Field label="Apps Script Web App URL" note="The deployed URL ending in /exec">
-                <Input type="url" value={gsScript} onChange={e=>{setGsScript(e.target.value);setGsTestResult(null);}} placeholder="https://script.google.com/macros/s/.../exec"/>
-              </Field>
-
-              {/* Collapsible script code */}
-              <button onClick={() => setShowScriptHelp(v=>!v)} className="flex items-center gap-2 text-sm text-[#4A90E2] hover:text-blue-700 font-medium">
-                <Code2 className="h-4 w-4"/>
-                {showScriptHelp ? 'Hide' : 'Show'} Apps Script code to copy
-                {showScriptHelp ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}
-              </button>
-              <AnimatePresence>
-                {showScriptHelp && (
-                  <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}} className="overflow-hidden">
-                    <pre className="bg-[#1A1A2E] text-[#A5F3FC] rounded-xl p-4 text-xs overflow-x-auto leading-relaxed">{`function doGet() {
-  const sheet = SpreadsheetApp
-    .getActiveSpreadsheet()
-    .getActiveSheet();
-  const data  = sheet.getDataRange().getValues();
-  const heads = data[0].map(String);
-  const words = data.slice(1)
-    .filter(row => row[0])
-    .map(row => {
-      const obj = {};
-      heads.forEach((h, i) => {
-        obj[h] = String(row[i] ?? '');
-      });
-      return obj;
-    });
-  return ContentService
-    .createTextOutput(
-      JSON.stringify({ words })
-    )
-    .setMimeType(
-      ContentService.MimeType.JSON
-    );
-}`}</pre>
-                    <ol className="text-xs text-muted-foreground space-y-1 mt-3 list-decimal list-inside">
-                      <li>Go to <a href="https://script.google.com" target="_blank" rel="noreferrer" className="text-[#4A90E2] underline">script.google.com</a> → New project</li>
-                      <li>Paste the code above, replacing any existing code</li>
-                      <li>Click <strong>Deploy → New deployment → Web App</strong></li>
-                      <li>Set <strong>Execute as: Me</strong>, <strong>Who has access: Anyone</strong></li>
-                      <li>Click Deploy → copy the <code>/exec</code> URL → paste it above</li>
-                    </ol>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
 
           {/* Auto-sync interval */}
           <div className="bg-card rounded-xl border border-border p-5 space-y-3">
@@ -650,7 +565,7 @@ function doGet() {
 
           {/* Test + Save buttons */}
           <div className="flex gap-3">
-            <button onClick={handleTestGS} disabled={gsTesting||(!gsCsvUrl&&!gsScript)}
+            <button onClick={handleTestGS} disabled={gsTesting||!gsCsvUrl}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-[#4A90E2] text-[#4A90E2] text-sm font-semibold hover:bg-[#4A90E2]/10 transition-colors disabled:opacity-40">
               {gsTesting?<Spinner/>:<Play className="h-4 w-4"/>} Test Connection
             </button>
@@ -688,11 +603,11 @@ function doGet() {
               are updated; new rows are added; nothing is deleted. To reach other learners' devices,
               use "Push to All Learners" below afterward.
             </p>
-            <button onClick={handleSyncGS} disabled={gs.syncing||(!gs.config.csvUrl&&!gs.config.scriptUrl)}
+            <button onClick={handleSyncGS} disabled={gs.syncing||!gs.config.csvUrl}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#F5A623] text-white text-sm font-bold hover:bg-[#E09400] transition-colors disabled:opacity-40">
               {gs.syncing?<><Spinner/>Syncing…</>:<><RefreshCw className="h-4 w-4"/>Sync from Google Sheet Now</>}
             </button>
-            {!gs.config.csvUrl && !gs.config.scriptUrl && (
+            {!gs.config.csvUrl && (
               <p className="text-xs text-amber-600 text-center">Save a URL above first</p>
             )}
             {gs.config.autoIntervalMin > 0 && (
@@ -737,7 +652,7 @@ function doGet() {
             {dupReport && (
               <div className="space-y-3 pt-1">
                 {/* Sheet-side report */}
-                {(gs.config.csvUrl || gs.config.scriptUrl) && (
+                {gs.config.csvUrl && (
                   dupReport.sheetDuplicates.length === 0 ? (
                     <SuccessBox>
                       <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5"/>
