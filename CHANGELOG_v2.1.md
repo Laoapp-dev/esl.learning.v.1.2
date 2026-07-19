@@ -208,3 +208,17 @@ of two.
   proxy to return.
 - Admin Panel and My Words import (CSV/JSON/XLSX) already supported up to
   20,000 rows / 50MB — confirmed and left as-is, comfortably over 10,000.
+
+## 7. This update: hide sync mechanism from learners + rebuild
+
+- `src/pages/LevelJourney.tsx` — the two learner-facing "no words yet"
+  messages used to say "add via Google Sheet in Admin Panel" / "Add words
+  ... in your Google Sheet". Learners never see the actual link (confirmed:
+  `csvUrl`/Google Sheet config only ever appears in `AdminPanel.tsx`, which
+  is only reachable when `currentUser.role === 'admin'` — the `/admin`
+  route isn't even registered for non-admin users), but these hints still
+  named the mechanism. Reworded to generic "check back soon" / "new lessons
+  are added regularly" so the admin's workflow is completely invisible to
+  learners.
+- No other changes this round — see `DEPLOY_ME_FIRST.md` for why the
+  "Still loading…" screen may still be showing up.
