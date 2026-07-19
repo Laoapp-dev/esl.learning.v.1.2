@@ -169,7 +169,7 @@ export function LevelJourney() {
                     </div>
                   )}
                   {isUnlocked && s.total === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">No {level} words yet — add via Google Sheet in Admin Panel</p>
+                    <p className="text-xs text-amber-600 mt-1">No {level} words yet — check back soon</p>
                   )}
                 </div>
 
@@ -188,7 +188,7 @@ export function LevelJourney() {
                     className="border-t border-border bg-muted/30 px-4 py-4">
                     {s.total === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-2">
-                        No {level} words in your library. Add words with <code className="font-mono text-[#F5A623]">cefrLevel={level}</code> in your Google Sheet.
+                        No {level} words in your library yet — new lessons are added regularly.
                       </p>
                     ) : (
                       <>
