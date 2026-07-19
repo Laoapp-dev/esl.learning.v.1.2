@@ -1,14 +1,23 @@
 /**
- * useGoogleSheet — Google Sheets / Apps Script sync for ESL Learning
+ * useGoogleSheet — Google Sheets CSV sync for ESL Learning
  *
- * Supports TWO modes:
- *  1. Published-CSV  : public read-only URL (File → Publish to web → CSV)
- *  2. Apps Script    : a deployed Google Apps Script Web App URL (GET returns JSON words)
+ * Published-CSV only: a public read-only URL from Google Sheets
+ * (File → Share → Publish to web → CSV). Apps Script mode has been
+ * removed — one connection method is simpler to set up and support, and
+ * the published-CSV link already covers the same use case (sheets that
+ * aren't publicly shared can still be published-to-web read-only without
+ * exposing edit access).
  *
  * Words are stored in a shared localStorage key so ALL users see the same
  * admin-managed word list when they open the app (including on mobile).
+ *
+ * CSV parsing uses PapaParse (not a hand-rolled splitter) so large,
+ * real-world sheet exports — fields containing commas, quoted text, or
+ * embedded line breaks — parse correctly at any size (tested well past
+ * 10,000 rows).
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
+import Papa from 'papaparse';
 import type { VocabularyWord, CEFRLevel, PartOfSpeech } from '@/types/vocabulary';
 
 // ── Storage key shared across all users ───────────────────────────────────────
@@ -17,9 +26,7 @@ export const GS_WORDS_KEY   = 'moe_gsheet_words';   // shared word list from she
 export const GS_LAST_SYNC   = 'moe_gsheet_lastsync';
 
 export interface GSConfig {
-  mode: 'csv' | 'script';     // which method to use
   csvUrl: string;              // published CSV URL
-  scriptUrl: string;           // Apps Script Web App URL
   autoIntervalMin: number;     // 0 = off
   lastSyncAt: string | null;
   lastSyncCount: number;
@@ -27,9 +34,7 @@ export interface GSConfig {
 }
 
 const DEFAULT_CONFIG: GSConfig = {
-  mode: 'csv',
   csvUrl: '',
-  scriptUrl: '',
   autoIntervalMin: 0,
   lastSyncAt: null,
   lastSyncCount: 0,
@@ -60,14 +65,9 @@ const VALID_POS:   PartOfSpeech[] = [
   'preposition','conjunction','interjection','phrase'
 ];
 
-function normalise(v: string, options: string[], fallback: string): string {
-  const t = (v || '').trim().toLowerCase();
-  return options.includes(t) ? t : fallback;
-}
-
 type RawWord = Record<string, string>;
 
-/** Map one CSV/JSON row → VocabularyWord partial (no id/dates/counts yet) */
+/** Map one CSV row → VocabularyWord partial (no id/dates/counts yet) */
 function parseRow(row: RawWord): Omit<VocabularyWord,
   'id'|'dateAdded'|'studyCount'|'correctCount'|'isLearned'|'isStarred'> | null {
 
@@ -98,32 +98,21 @@ function parseRow(row: RawWord): Omit<VocabularyWord,
   };
 }
 
-/** Parse raw CSV text → array of row objects */
+/**
+ * Parse raw CSV text → array of row objects, keyed by header.
+ * Uses PapaParse so quoted fields, embedded commas, escaped quotes ("")
+ * and multi-line cells all parse correctly — a hand-rolled line-splitter
+ * breaks on exactly those cases, which real Google Sheets exports hit
+ * often once a list grows past a few hundred rows.
+ */
 function parseCsv(text: string): RawWord[] {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-
-  // Respect quoted fields
-  function splitLine(line: string): string[] {
-    const result: string[] = [];
-    let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { inQ = !inQ; continue; }
-      if (c === ',' && !inQ) { result.push(cur); cur = ''; continue; }
-      cur += c;
-    }
-    result.push(cur);
-    return result;
-  }
-
-  const headers = splitLine(lines[0]).map(h => h.trim());
-  return lines.slice(1).map(line => {
-    const vals = splitLine(line);
-    const obj: RawWord = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] ?? '').trim(); });
-    return obj;
+  const result = Papa.parse<RawWord>(text, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h) => h.trim(),
+    transform: (v) => (typeof v === 'string' ? v.trim() : v),
   });
+  return (result.data || []).filter(Boolean);
 }
 
 // ── CORS proxies – tried in order until one works ──────────────────────────────
@@ -137,7 +126,9 @@ async function fetchWithProxy(url: string): Promise<string> {
   let lastErr: Error = new Error('All proxies failed');
   for (const proxy of PROXIES) {
     try {
-      const res = await fetch(proxy(url), { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+      // 30s timeout (not 12s) — a 10,000+ row published sheet can take a
+      // while for Google to render as CSV plus proxy round-trip time.
+      const res = await fetch(proxy(url), { cache: 'no-store', signal: AbortSignal.timeout(30000) });
       if (res.ok) return res.text();
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (e) {
@@ -150,7 +141,14 @@ async function fetchWithProxy(url: string): Promise<string> {
 // ── Hook ───────────────────────────────────────────────────────────────────────
 export function useGoogleSheet() {
   const [config, setConfig] = useState<GSConfig>(() => {
-    try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(GS_CONFIG_KEY) || '{}') }; }
+    try {
+      // Backward-compatible: old configs may still have mode/scriptUrl
+      // fields saved from before Apps Script mode was removed — spreading
+      // them into DEFAULT_CONFIG's shape simply drops anything unused.
+      const stored = JSON.parse(localStorage.getItem(GS_CONFIG_KEY) || '{}');
+      return { ...DEFAULT_CONFIG, csvUrl: stored.csvUrl ?? '', autoIntervalMin: stored.autoIntervalMin ?? 0,
+        lastSyncAt: stored.lastSyncAt ?? null, lastSyncCount: stored.lastSyncCount ?? 0, enabled: stored.enabled ?? false };
+    }
     catch { return DEFAULT_CONFIG; }
   });
   const [syncing,  setSyncing]  = useState(false);
@@ -182,36 +180,20 @@ export function useGoogleSheet() {
     return rows.map(parseRow).filter(Boolean) as ReturnType<typeof parseRow>[];
   }, [config.csvUrl]);
 
-  // ── Fetch & parse from Apps Script ──────────────────────────────────────────
-  const fetchFromScript = useCallback(async (urlOverride?: string) => {
-    const url = urlOverride ?? config.scriptUrl;
-    if (!url) throw new Error('No Apps Script URL configured');
-    // Apps Script returns JSON: { words: [...] } or just [...]
-    const text = await fetchWithProxy(url);
-    let json: any;
-    try { json = JSON.parse(text); } catch { throw new Error('Apps Script did not return valid JSON'); }
-    const rows: RawWord[] = Array.isArray(json) ? json : (json.words ?? json.data ?? []);
-    if (!Array.isArray(rows)) throw new Error('Unexpected JSON structure from Apps Script');
-    return rows.map(parseRow).filter(Boolean) as ReturnType<typeof parseRow>[];
-  }, [config.scriptUrl]);
-
   // ── Core sync ────────────────────────────────────────────────────────────────
   /**
-   * Fetch words from the configured source and merge into the shared word store.
-   * importFn is vocabulary.importWords — called with the new words.
+   * Fetch words from the configured sheet and merge into the shared word store.
+   * importFn is vocabulary.mergeSharedWords — called with the new words.
    * Returns { success, count, error? }
    */
   const syncNow = useCallback(async (
     importFn?: (words: any[]) => void,
-    overrides?: { csvUrl?: string; scriptUrl?: string; mode?: 'csv' | 'script' }
+    overrides?: { csvUrl?: string }
   ): Promise<{ success: boolean; count: number; error?: string }> => {
     setSyncing(true);
     setError(null);
     try {
-      const mode = overrides?.mode ?? config.mode;
-      const words = mode === 'script'
-        ? await fetchFromScript(overrides?.scriptUrl)
-        : await fetchFromCsv(overrides?.csvUrl);
+      const words = await fetchFromCsv(overrides?.csvUrl);
 
       if (words.length === 0) throw new Error('No valid words found — check column headers');
 
@@ -231,7 +213,7 @@ export function useGoogleSheet() {
       setSyncing(false);
       return { success: false, count: 0, error: msg };
     }
-  }, [config.mode, fetchFromCsv, fetchFromScript, saveConfig]);
+  }, [fetchFromCsv, saveConfig]);
 
   // ── Check the SHEET ITSELF for duplicate rows, without merging anything ─────
   // Answers "does my Google Sheet have the same word typed in more than one
@@ -239,13 +221,10 @@ export function useGoogleSheet() {
   // mergeSharedWords/dedupeWords already handle). Useful for an admin who
   // wants to clean the source data, not just the app's copy of it.
   const checkForDuplicates = useCallback(async (
-    overrides?: { csvUrl?: string; scriptUrl?: string; mode?: 'csv' | 'script' }
+    overrides?: { csvUrl?: string }
   ): Promise<{ success: boolean; totalRows: number; duplicates: { word: string; count: number }[]; error?: string }> => {
     try {
-      const mode = overrides?.mode ?? config.mode;
-      const rows = mode === 'script'
-        ? await fetchFromScript(overrides?.scriptUrl)
-        : await fetchFromCsv(overrides?.csvUrl);
+      const rows = await fetchFromCsv(overrides?.csvUrl);
 
       const counts = new Map<string, { word: string; count: number }>();
       for (const r of rows) {
@@ -263,11 +242,11 @@ export function useGoogleSheet() {
     } catch (err) {
       return { success: false, totalRows: 0, duplicates: [], error: (err as Error).message };
     }
-  }, [config.mode, fetchFromCsv, fetchFromScript]);
+  }, [fetchFromCsv]);
 
   // ── Test connection (dry run, no import) ─────────────────────────────────────
   const testConnection = useCallback(async (
-    overrides?: { csvUrl?: string; scriptUrl?: string; mode?: 'csv' | 'script' }
+    overrides?: { csvUrl?: string }
   ) => {
     return syncNow(undefined, overrides);
   }, [syncNow]);
@@ -286,13 +265,13 @@ export function useGoogleSheet() {
   // ── Auto-sync timer ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
-    if (config.autoIntervalMin > 0 && (config.csvUrl || config.scriptUrl) && config.enabled) {
+    if (config.autoIntervalMin > 0 && config.csvUrl && config.enabled) {
       timerRef.current = setInterval(() => {
         window.dispatchEvent(new CustomEvent('moe-gsheet-autosync'));
       }, config.autoIntervalMin * 60_000);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [config.autoIntervalMin, config.csvUrl, config.scriptUrl, config.enabled]);
+  }, [config.autoIntervalMin, config.csvUrl, config.enabled]);
 
   return {
     config, saveConfig,

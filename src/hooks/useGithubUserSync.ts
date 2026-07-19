@@ -64,6 +64,27 @@ async function ghGet(config: GithubSyncConfig, path: string): Promise<{ content:
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitHub GET failed: ${res.status}`);
   const data = await res.json();
+
+  // GitHub's Contents API only inlines base64 `content` for files up to
+  // 1MB — a shared vocabulary file with 10,000+ richly-tagged words
+  // (definitions, examples, translations) easily exceeds that, and the
+  // JSON response comes back with `content` empty/missing even though the
+  // file exists and has a valid `sha`. When that happens, re-fetch the
+  // SAME contents URL with the "raw" media type instead, which returns
+  // the actual file bytes directly (no base64 wrapper, no 1MB cap — this
+  // path handles files up to GitHub's 100MB repo file limit).
+  if (!data.content) {
+    const rawRes = await fetch(url, {
+      headers: {
+        Authorization: `token ${config.token}`,
+        Accept: 'application/vnd.github.raw',
+      },
+    });
+    if (!rawRes.ok) throw new Error(`GitHub GET (raw) failed: ${rawRes.status}`);
+    const content = await rawRes.text();
+    return { content, sha: data.sha };
+  }
+
   const decoded = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
   return { content: decoded, sha: data.sha };
 }
