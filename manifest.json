@@ -1,0 +1,75 @@
+{
+  "background_color": "#ffffff",
+  "description": "ESL Learning – Level up your English with flashcards, quizzes, matching games and more.",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "ESL Learning",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "ESL Learning",
+  "start_url": "/",
+  "theme_color": "#F5A623",
+  "icons": [
+    {
+      "src": "https://laoapp-dev.github.io/esl.learning.v.1.2/favicon.ico",
+      "type": "image/x-icon",
+      "isSquare": false,
+      "isPng": false,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 0,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    },
+    {
+      "src": "https://laoapp-dev.github.io/esl.learning.v.1.2/icons/favicon-32.png",
+      "type": "image/png",
+      "sizes": "32x32",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 32,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    },
+    {
+      "src": "https://laoapp-dev.github.io/esl.learning.v.1.2/icons/favicon-16.png",
+      "type": "image/png",
+      "sizes": "16x16",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 16,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    },
+    {
+      "src": "https://laoapp-dev.github.io/esl.learning.v.1.2/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 180,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    },
+    {
+      "src": "https://laoapp-dev.github.io/esl.learning.v.1.2/icons/icon-512.png",
+      "isSquare": false,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 0,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    }
+  ]
+}
