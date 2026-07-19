@@ -164,3 +164,47 @@ Seeded more carefully than the version that shipped before:
 - Only runs the very first time a browser's shared curriculum is empty;
   an admin's own CSV/JSON import or Google Sheet sync always takes
   priority and is never overwritten.
+
+## 6. This update: GitHub cloud reset workflow, Apps Script removed, big-CSV fix
+
+**(1) Reset the GitHub cloud database, then re-sync — now documented and
+fixed end-to-end.** The pieces already existed but had a real bug that
+would've broken on a large wordlist; the workflow is now, in Admin Panel:
+1. **Google Sheet tab** — a new guide box explains this exact flow.
+2. **Import/Export tab → Danger Zone → "Reset Curriculum Vocabulary"** —
+   deletes the old wordlist from **both** this device and the GitHub cloud
+   file in one click (it already called `clearSharedVocabulary()`, which
+   overwrites the cloud file with an empty list).
+3. **Google Sheet tab → paste your new sheet link → "Sync from Google
+   Sheet Now"** — pulls the new words onto this device.
+4. **"Push to All Learners"** — writes the new wordlist to the GitHub
+   cloud file and every learner's device picks it up on next login (or
+   within 15 min with auto-sync on).
+
+**Real bug fixed along the way:** GitHub's Contents API only returns a
+file's content inline for files ≤1MB — anything bigger (which a
+10,000+ word JSON easily is) came back with an **empty content field**,
+silently breaking both "pull shared vocabulary" and the "get current file
+version" step every push needs. `ghGet` now detects that case and
+re-fetches the same file using GitHub's raw content type instead, which
+has no such limit — pushing, pulling, and resetting the cloud wordlist all
+now work correctly at any size.
+
+**(2) Apps Script removed.** Google Sheet sync is CSV-link only now — the
+"Connection Method" toggle, the Apps Script URL field, and the
+copy-paste script template are all gone from Admin Panel → Google Sheet
+tab. One simple setup path (File → Share → Publish to web → CSV) instead
+of two.
+
+**(3) Big CSV/wordlist support (10,000+) hardened further:**
+- Fixed the GitHub cloud 1MB bug above — this was the real ceiling on
+  supporting a large shared wordlist end-to-end, not the import step.
+- Google Sheet CSV parsing now uses PapaParse instead of a hand-rolled
+  line-splitter, which broke on real-world sheets once fields contained
+  commas, quoted text, or line breaks inside a cell — common well before
+  10,000 rows. PapaParse handles all of that correctly at any size.
+- Fetch timeout for the Google Sheet CSV raised from 12s to 30s, since a
+  10,000+ row published sheet genuinely takes longer for Google + the CORS
+  proxy to return.
+- Admin Panel and My Words import (CSV/JSON/XLSX) already supported up to
+  20,000 rows / 50MB — confirmed and left as-is, comfortably over 10,000.
