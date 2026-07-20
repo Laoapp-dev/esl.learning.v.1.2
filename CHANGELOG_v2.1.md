@@ -222,3 +222,87 @@ of two.
   learners.
 - No other changes this round — see `DEPLOY_ME_FIRST.md` for why the
   "Still loading…" screen may still be showing up.
+
+## 8. This update: fixed the real ~5,000-word ceiling + Cloudflare Pages support
+
+**Found and fixed the actual cause of the "GitHub can only handle ~5,000
+words" wall.** It wasn't GitHub — it was `localStorage`, which has a
+small, inconsistent per-origin quota (commonly ~5MB, and in some browsers
+measured in UTF-16 code units, which roughly halves the usable budget).
+The shared curriculum (`GS_WORDS_KEY`) was still being written there in
+several places even after last update's GitHub-API raw-content fix, and
+every write attempt beyond ~5,000 richly-tagged words would silently fail.
+
+**Fix — migrated the shared curriculum from localStorage to IndexedDB**
+(`src/lib/idbStore.ts`, new): IndexedDB has no comparable small fixed
+limit (browsers grant it a share of disk space, typically tens of MB up
+to several GB) and stores data natively without the JSON-string overhead.
+- `useVocabulary.ts` now loads the shared curriculum from IndexedDB
+  asynchronously on mount, with automatic one-time migration of any words
+  still sitting in the old localStorage key (or duplicated into a
+  learner's personal storage from even further back) — nothing is lost,
+  the old key is then cleared to free up its quota for good.
+- Every write path (merge, replace, edit, delete, dedupe, reset) now
+  persists to IndexedDB instead.
+- Cross-tab live sync (previously via the browser's `storage` event, which
+  only fires for localStorage) now uses `BroadcastChannel` instead, since
+  IndexedDB writes don't fire that event.
+- Removed a second, redundant raw localStorage write inside
+  `useGoogleSheet.ts`'s sync function that would silently abort an entire
+  large-sheet sync the moment it hit the same quota wall, before the
+  (already-fixed) IndexedDB path even ran. This was the last real ceiling
+  on syncing 10,000+ words end-to-end — now removed.
+
+**Cloudflare Pages support added** (works alongside the existing GitHub
+Pages setup, or instead of it):
+- `CLOUDFLARE_DEPLOY.md` — full setup guide, both the no-YAML dashboard
+  method and a GitHub Actions method.
+- `.github/workflows/deploy-cloudflare.yml` — optional Action that builds
+  and deploys to Cloudflare Pages on every push (needs
+  `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` repo secrets).
+- `wrangler.toml` — for `wrangler pages deploy` CLI usage.
+- `public/_headers` — sets `no-cache` on the HTML shell / service worker /
+  manifest and long-cache on hashed assets. This matters more on
+  Cloudflare than GitHub Pages, since Cloudflare's edge cache is more
+  aggressive by default — without this, a stale cached shell could stick
+  around longer, worsening exactly the "stuck on old version" boot problem
+  this app already has several layers of defense against.
+- `public/_redirects` — SPA fallback safety net for any path that isn't a
+  real file (this app uses HashRouter, so it's mostly a belt-and-suspenders
+  measure, not strictly required).
+- No code changes were needed for Cloudflare Pages itself — the existing
+  relative build path (`base: './'`) and `HashRouter` already work
+  identically on any host (GitHub Pages subpath, Cloudflare Pages
+  subdomain or custom domain root, etc.).
+- PWA install (desktop + Android + iOS) already fully configured and
+  confirmed to work the same way on Cloudflare Pages — see
+  `CLOUDFLARE_DEPLOY.md` for how to verify the install prompt on each.
+
+## 9. This update: renamed to "ESL Master Vocab" v1.2.0
+
+Renamed everywhere it appears — app name, package name, browser tab
+title, PWA install name (both `name` and `short_name`), meta tags/Open
+Graph tags, sidebar logo text, login screen heading + image alt text,
+error screen text, console log tags, and the GitHub commit-message tag
+used by GitHub Sync:
+- `ESL Learning` → **`ESL Master Vocab`** (short_name: `ESL Vocab`, used
+  for the home-screen icon label where space is tight)
+- `package.json` name: `esl-learning` → `esl-master-vocab`
+- version bumped to **1.2.0** everywhere: `package.json`, and a new
+  `__APP_VERSION__` build-time constant (same pattern as the existing
+  `__BUILD_TIME__` one) now feeds both the small "v1.2.0 · build …" stamp
+  on the login screen AND the "App Version" row in Settings → About,
+  which was previously a hardcoded `2.0.0` string that never actually
+  matched `package.json` — now both read from one real source.
+- Cloudflare project name in `wrangler.toml` / `deploy-cloudflare.yml`
+  also updated to `esl-master-vocab`, with an explicit warning comment in
+  both files: **if you already have a live Cloudflare Pages project under
+  the old name, keep using that exact name instead** — changing it creates
+  a brand new project/URL rather than renaming the existing one.
+- Did NOT touch anything that depends on your actual GitHub repo name
+  (`esl.learning`) — the app already works under any repo/project name
+  thanks to the relative build path, so renaming the repo itself is
+  entirely optional and unrelated to this update.
+
+Runs on both GitHub Pages and Cloudflare Pages exactly as before — this
+was a branding/version change only, no deploy-relevant code changed.

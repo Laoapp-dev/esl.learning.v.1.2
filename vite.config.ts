@@ -18,13 +18,15 @@ const base = './'
 
 export default defineConfig({
   base,
-  // Baked-in build timestamp, shown small on the login screen (AuthPage) and
-  // logged to the console on boot. Lets anyone confirm — just by looking at
-  // the live site, no repo access needed — whether a given deploy actually
-  // took effect, instead of guessing whether "still broken" means the fix
-  // didn't work or the browser is just still serving an old cached build.
+  // Baked-in build timestamp + version, shown small on the login screen
+  // (AuthPage) and logged to the console on boot. Lets anyone confirm —
+  // just by looking at the live site, no repo access needed — whether a
+  // given deploy actually took effect, instead of guessing whether "still
+  // broken" means the fix didn't work or the browser is just still
+  // serving an old cached build.
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __APP_VERSION__: JSON.stringify('1.2.0'),
   },
   plugins: [
     react(),
@@ -44,9 +46,9 @@ export default defineConfig({
         'icons/icon-512-maskable.png',
       ],
       manifest: {
-        name: 'ESL Learning',
-        short_name: 'ESL Learning',
-        description: 'English vocabulary learning app with flashcards, quizzes, and more.',
+        name: 'ESL Master Vocab',
+        short_name: 'ESL Vocab',
+        description: 'Master English vocabulary with flashcards, quizzes, matching, spelling, and more.',
         theme_color: '#1A1A2E',
         background_color: '#1A1A2E',
         display: 'standalone',
@@ -71,7 +73,7 @@ export default defineConfig({
             sizes: '512x512',
             type: 'image/png',
             form_factor: 'narrow',
-            label: 'ESL Learning — Vocabulary Learning',
+            label: 'ESL Master Vocab — Vocabulary Learning',
           },
         ],
         categories: ['education', 'productivity'],
