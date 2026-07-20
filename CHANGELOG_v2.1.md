@@ -306,3 +306,51 @@ used by GitHub Sync:
 
 Runs on both GitHub Pages and Cloudflare Pages exactly as before — this
 was a branding/version change only, no deploy-relevant code changed.
+
+## 10. This update: static base curriculum baked into the app (no storage)
+
+**Architecture change per request:** the word database no longer needs
+localStorage or IndexedDB at all — it's now bundled directly into the
+app's code as `src/data/defaultVocabulary.json` and loaded straight from
+the deployed build into memory each session (still via a lazy dynamic
+import, so it's its own chunk and never blocks first paint — just never
+written to any browser storage).
+
+- `useVocabulary.ts` — new `baseWords` state, loaded once on mount purely
+  in memory. It's a separate layer from `sharedContent` (admin's
+  synced/imported extra words, which still uses IndexedDB — kept for
+  admins who want to add custom words beyond the bundled base), combined
+  together in the `words` list every learner sees. Removed the old
+  "seed the built-in bank into IndexedDB" effect entirely — nothing to
+  seed anymore, the base list is just always there.
+- Every base word now has a **stable, deterministic id** (`w-<word-slug>`,
+  baked into the JSON file itself, not generated at runtime) so a
+  learner's own progress (starred/learned/study count) reliably survives
+  reloads, rebuilds, and redeploys.
+
+**Merged your new 9,142-row file with the existing base list.** Honest
+result: **5,955 unique words**, not 10,000+. The two files you've
+provided overlap heavily — of the new file's 5,921 unique entries after
+its own internal duplicates were removed, only ~438 were actually new
+against what the app already had; the rest were the same words already
+in the bundled list. I did not fabricate additional words to hit a
+10,000 target — that would mean invented definitions and, worse,
+guessed Lao/Thai translations that could actively mislead learners.
+Fixed the same 7-row column-shift corruption found in the earlier file
+(same underlying source data). All 5,955 words re-organized into the
+same 16 categories as before, all populated:
+Describing People (1,322) · Common Actions/Verbs (1,212) ·
+Work/Study/Technology (850) · Places & Locations (438) ·
+Body Parts & Health (353) · People/Family/Relationships (344) ·
+Policy & Governance (324) · Weather & Nature (256) ·
+Money & Commerce (199) · Time & Sequences (169) · Food & Drink (140) ·
+Environment & Ecology (116) · Economy & Finance (114) ·
+Agriculture & Farming (53) · Climate & Atmospheric Dynamics (36) ·
+Forestry & Land Management (29).
+
+**To genuinely reach 10,000+:** the Admin Panel's CSV/JSON import and
+Google Sheet sync (both fixed for large files in an earlier update) are
+still fully available as an *additional* layer on top of this bundled
+base — an admin can import more non-overlapping words any time without
+touching the code at all. Or send another source file that isn't mostly
+the same words as these first two and I'll merge it in the same way.
