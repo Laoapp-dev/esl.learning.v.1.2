@@ -1,5 +1,5 @@
 /**
- * useGoogleSheet — Google Sheets CSV sync for ESL Learning
+ * useGoogleSheet — Google Sheets CSV sync for ESL Master Vocab
  *
  * Published-CSV only: a public read-only URL from Google Sheets
  * (File → Share → Publish to web → CSV). Apps Script mode has been
@@ -197,9 +197,17 @@ export function useGoogleSheet() {
 
       if (words.length === 0) throw new Error('No valid words found — check column headers');
 
-      // Persist shared word list so all users see it on page load
-      localStorage.setItem(GS_WORDS_KEY, JSON.stringify(words));
-
+      // NOTE: this used to also write the raw word list straight to
+      // localStorage here (`localStorage.setItem(GS_WORDS_KEY, ...)`) as a
+      // second copy "for regular users who don't trigger sync". That's
+      // exactly the bug that capped shared curriculum syncs at roughly
+      // 5,000 words — localStorage has a small, inconsistent per-origin
+      // quota (often ~5MB), and it would throw and abort the whole sync
+      // right here, before `importFn` (which persists to IndexedDB, with
+      // effectively no such ceiling) ever ran. Removed — `importFn` below
+      // is the only persistence path now, and every device that logs in
+      // loads the shared curriculum straight from IndexedDB via
+      // useVocabulary, so there's no second copy to keep in sync anyway.
       if (importFn) importFn(words);
 
       const now = new Date().toISOString();
@@ -251,17 +259,6 @@ export function useGoogleSheet() {
     return syncNow(undefined, overrides);
   }, [syncNow]);
 
-  // ── Load shared words on mount (for regular users who don't trigger sync) ────
-  const getSharedWords = useCallback((): any[] => {
-    try {
-      const stored = localStorage.getItem(GS_WORDS_KEY);
-      const parsed = stored ? JSON.parse(stored) : [];
-      // Defensive: drop any null/undefined/word-less entries so callers
-      // (App.tsx → vocabulary.mergeSharedWords) never see them.
-      return Array.isArray(parsed) ? parsed.filter((w) => w && typeof w === 'object' && w.word) : [];
-    } catch { return []; }
-  }, []);
-
   // ── Auto-sync timer ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -277,6 +274,6 @@ export function useGoogleSheet() {
     config, saveConfig,
     syncing, error, setError,
     lastSync,
-    syncNow, testConnection, getSharedWords, checkForDuplicates,
+    syncNow, testConnection, checkForDuplicates,
   };
 }

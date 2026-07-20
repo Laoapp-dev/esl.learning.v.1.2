@@ -99,7 +99,7 @@ async function ghPut(
   const url = `https://api.github.com/repos/${config.repo}/contents/${path}`;
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(content, null, 2))));
   const body: Record<string, string> = {
-    message: `[ESL Learning] ${message} — ${new Date().toISOString()}`,
+    message: `[ESL Master Vocab] ${message} — ${new Date().toISOString()}`,
     content: encoded,
     branch: config.branch,
   };

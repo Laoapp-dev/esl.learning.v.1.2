@@ -33,7 +33,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     // eslint-disable-next-line no-console
-    console.error('ESL Learning crashed:', error, info.componentStack);
+    console.error('ESL Master Vocab crashed:', error, info.componentStack);
   }
 
   handleReload = () => {
@@ -104,7 +104,7 @@ export class ErrorBoundary extends Component<Props, State> {
             Something went wrong
           </h1>
           <p style={{ opacity: 0.75, marginBottom: 20, maxWidth: 420 }}>
-            ESL Learning hit an unexpected error and couldn't continue. This
+            ESL Master Vocab hit an unexpected error and couldn't continue. This
             is usually fixed by reloading — your saved words and progress are
             not affected, they're stored safely in this browser.
           </p>

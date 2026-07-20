@@ -84,17 +84,12 @@ function AppInner() {
     }
   }, [vocabulary.externalSyncNotice]); // eslint-disable-line
 
-  // On login: merge shared Google Sheet words + pull vocab from GitHub
+  // On login: pull vocab from GitHub (shared curriculum itself is loaded
+  // by useVocabulary directly from IndexedDB on mount — see that hook)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
     if (prevAuthRef.current) return; // already ran for this session
     prevAuthRef.current = true;
-
-    // Merge Google Sheet shared words (cached in localStorage)
-    const shared = gsheet.getSharedWords();
-    if (shared.length > 0) {
-      vocabulary.mergeSharedWords(shared);
-    }
 
     // Pull vocab from GitHub in background (cross-device sync)
     githubSync.pullVocab(currentUser.id).then(r => {
@@ -128,6 +123,7 @@ function AppInner() {
   // it can never crash the app.
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (!vocabulary.sharedLoaded) return; // wait for the real IndexedDB load to resolve first
     if (vocabulary.sharedWordCount > 0) return;
     let cancelled = false;
 
@@ -159,7 +155,7 @@ function AppInner() {
       .catch(() => {/* built-in word bank unavailable — non-fatal, app still works empty until an admin imports */});
 
     return () => { cancelled = true; };
-  }, [isAuthenticated, vocabulary.sharedWordCount]); // eslint-disable-line
+  }, [isAuthenticated, vocabulary.sharedLoaded, vocabulary.sharedWordCount]); // eslint-disable-line
 
   // Reset prevAuthRef when user logs out
   useEffect(() => {
@@ -179,7 +175,7 @@ function AppInner() {
     if (!isAuthenticated || !sheetUrl) return;
 
     const run = () => {
-      gsheet.syncNow((words) => vocabulary.mergeSharedWords(words), { csvUrl: sheetUrl, mode: 'csv' });
+      gsheet.syncNow((words) => vocabulary.mergeSharedWords(words), { csvUrl: sheetUrl });
     };
 
     run(); // fetch once immediately on login/app open

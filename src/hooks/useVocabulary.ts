@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { VocabularyWord, CEFRLevel, StudySession, UserProfile, AppSettings, FilterLevel, SortOption, Achievement } from '@/types/vocabulary';
+import { idbGet, idbSet, idbDelete } from '@/lib/idbStore';
 
 function makeStorageKeys(prefix?: string) {
   const p = prefix || 'lexicon';
@@ -450,7 +451,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
   // The `words` array this hook returns is still the full combined list
   // (unchanged for every page that reads vocabulary.words), computed from
   // the three stores in memory rather than persisted as one giant blob.
-  const initRef = useRef<{ manual: VocabularyWord[]; shared: VocabularyWord[] } | null>(null);
+  const initRef = useRef<{ manual: VocabularyWord[]; shared: VocabularyWord[]; legacyShared: VocabularyWord[] } | null>(null);
   function getInitialSplit() {
     if (initRef.current) return initRef.current;
 
@@ -462,23 +463,22 @@ export function useVocabulary(dataKeyPrefix?: string) {
     const legacyShared = rawPersonal.filter(w => w.source === 'shared');
     const manual = rawPersonal.filter(w => w.source !== 'shared');
 
-    let shared: VocabularyWord[];
-    try {
-      shared = sanitizeWords(JSON.parse(localStorage.getItem(GS_WORDS_KEY) || '[]'));
-    } catch {
-      shared = [];
-    }
-    if (legacyShared.length > 0) {
-      shared = upsertWords(shared, legacyShared, 'shared').result;
-      try { localStorage.setItem(GS_WORDS_KEY, JSON.stringify(shared)); } catch { /* full/private-mode storage — safe to skip, a future admin push will re-populate it */ }
-    }
-
-    initRef.current = { manual, shared };
+    // Shared curriculum is no longer read here — localStorage has a small,
+    // inconsistent per-origin quota (commonly ~5MB, sometimes measured in
+    // UTF-16 code units) that caps out around 5,000 richly-tagged words,
+    // well short of the 8,000-10,000+ this app is meant to support. It now
+    // lives in IndexedDB instead (see the load+migrate effect below), which
+    // is inherently asynchronous — so it starts empty here and fills in a
+    // moment after mount. `legacyShared` (curriculum words found stuck in
+    // personal storage) and any words still saved under the old
+    // localStorage GS_WORDS_KEY are both migrated into IndexedDB there.
+    initRef.current = { manual, shared: [], legacyShared };
     return initRef.current;
   }
 
   const [manualWords, setManualWords] = useState<VocabularyWord[]>(() => getInitialSplit().manual);
   const [sharedContent, setSharedContent] = useState<VocabularyWord[]>(() => getInitialSplit().shared);
+  const [sharedLoaded, setSharedLoaded] = useState(false);
   const [sharedProgress, setSharedProgress] = useState<Record<string, Partial<VocabularyWord> & { hidden?: boolean }>>(() =>
     loadFromStorage<Record<string, Partial<VocabularyWord> & { hidden?: boolean }>>(KEYS.words + '_progress', {})
   );
@@ -495,6 +495,80 @@ export function useVocabulary(dataKeyPrefix?: string) {
   const [achievements] = useState<Achievement[]>(() =>
     loadFromStorage(KEYS.achievements, ACHIEVEMENTS)
   );
+
+  // ── Load the shared curriculum from IndexedDB (async) ────────────────────
+  // Runs once per mount. Also handles one-time migration: any curriculum
+  // words still sitting in the OLD localStorage key (from before this
+  // moved to IndexedDB) or duplicated into this account's own personal
+  // storage (legacyShared, from before the personal/shared split existed)
+  // get folded in here, then the old localStorage key is cleared so its
+  // quota is freed up for good.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const fromIdb = await idbGet<VocabularyWord[]>(GS_WORDS_KEY);
+      let combined = sanitizeWords(fromIdb ?? []);
+
+      let legacyRaw: string | null = null;
+      try { legacyRaw = localStorage.getItem(GS_WORDS_KEY); } catch { /* ignore */ }
+      const legacyFromLocalStorage = legacyRaw ? sanitizeWords(JSON.parse(legacyRaw)) : [];
+
+      const { legacyShared } = initRef.current ?? { legacyShared: [] as VocabularyWord[] };
+      const toMigrate = [...legacyFromLocalStorage, ...legacyShared];
+
+      if (toMigrate.length > 0) {
+        combined = upsertWords(combined, toMigrate, 'shared').result;
+      }
+      if (cancelled) return;
+
+      setSharedContent(combined);
+      setSharedLoaded(true);
+
+      // Persist the migrated/combined result and clear the old localStorage
+      // copy so it can never silently hit the small-quota wall again.
+      if (toMigrate.length > 0 || fromIdb === null) {
+        idbSet(GS_WORDS_KEY, combined).catch(() => {});
+      }
+      if (legacyRaw !== null) {
+        try { localStorage.removeItem(GS_WORDS_KEY); } catch { /* ignore */ }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fire-and-forget persist to IndexedDB — call after every sharedContent
+  // update instead of localStorage.setItem. Never throws/blocks the caller;
+  // IndexedDB's practical quota is large enough (tens of MB+) that this
+  // realistically never fails at any word-list size this app supports.
+  const sharedChannelRef = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel('esl_shared_vocab');
+    sharedChannelRef.current = ch;
+    ch.onmessage = (e) => {
+      if (e?.data?.type !== 'shared-updated') return;
+      idbGet<VocabularyWord[]>(GS_WORDS_KEY).then((fresh) => {
+        if (!fresh) return;
+        const incoming = sanitizeWords(fresh);
+        setSharedContent(prev => {
+          if (incoming.length !== prev.length) {
+            setExternalSyncNotice({ added: Math.max(0, incoming.length - prev.length), updated: 0 });
+          }
+          return incoming;
+        });
+      });
+    };
+    return () => ch.close();
+  }, []);
+
+  const persistShared = useCallback((words: VocabularyWord[]) => {
+    idbSet(GS_WORDS_KEY, words)
+      .then(() => { sharedChannelRef.current?.postMessage({ type: 'shared-updated' }); })
+      .catch(() => {
+        setStorageWarning(`Couldn't save the shared curriculum (${words.length.toLocaleString()} words) — this browser's storage is unavailable.`);
+      });
+  }, []);
 
   // The combined view every page in the app actually reads. Curriculum
   // words get this learner's personal progress (star/learned/study count)
@@ -567,18 +641,9 @@ export function useVocabulary(dataKeyPrefix?: string) {
         } catch { /* ignore malformed payload */ }
         return;
       }
-
-      if (e.key === GS_WORDS_KEY) {
-        try {
-          const incoming = sanitizeWords(JSON.parse(e.newValue));
-          setSharedContent(prev => {
-            if (incoming.length !== prev.length) {
-              setExternalSyncNotice({ added: Math.max(0, incoming.length - prev.length), updated: 0 });
-            }
-            return incoming;
-          });
-        } catch { /* ignore malformed payload */ }
-      }
+      // Shared curriculum cross-tab sync moved to a BroadcastChannel effect
+      // below — IndexedDB writes (unlike localStorage) never fire the
+      // browser's native 'storage' event, so that's no longer usable here.
     }
 
     window.addEventListener('storage', handleStorage);
@@ -655,8 +720,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
     if (isContentEdit) {
       setSharedContent(prev => {
         const next = prev.map(w => w.id === id ? { ...w, ...updates } : w);
-        try { localStorage.setItem(GS_WORDS_KEY, JSON.stringify(next)); }
-        catch { setStorageWarning(`Couldn't save the shared curriculum — the browser's storage is full.`); }
+        persistShared(next);
         return next;
       });
     } else {
@@ -675,8 +739,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
     // re-import / dedupe / reset already work).
     setSharedContent(prev => {
       const next = prev.filter(w => w.id !== id);
-      try { localStorage.setItem(GS_WORDS_KEY, JSON.stringify(next)); }
-      catch { setStorageWarning(`Couldn't save the shared curriculum — the browser's storage is full.`); }
+      persistShared(next);
       return next;
     });
     setSharedProgress(prev => {
@@ -922,8 +985,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
       }
       const deduped = order.map(k => byKey.get(k)!);
       finalCount = deduped.length;
-      try { localStorage.setItem(GS_WORDS_KEY, JSON.stringify(deduped)); }
-      catch { setStorageWarning(`Couldn't save the deduplicated curriculum — the browser's storage is full.`); }
+      persistShared(deduped);
       return deduped;
     });
     return { removedCount, uniqueCount: finalCount };
@@ -964,14 +1026,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
         const { result, added, updated } = upsertWords(prev, sharedIncoming, source);
         addedCount += added;
         updatedCount += updated;
-        try {
-          localStorage.setItem(GS_WORDS_KEY, JSON.stringify(result));
-        } catch (error) {
-          setStorageWarning(
-            `Couldn't save the shared curriculum (${result.length.toLocaleString()} words) — the browser's storage is full. ` +
-            `Try removing unused/duplicate words from the curriculum.`
-          );
-        }
+        persistShared(result);
         return result;
       });
     }
@@ -1007,8 +1062,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
       updatedCount = updated;
       removedCount = mergedShared.length - finalShared.length;
 
-      try { localStorage.setItem(GS_WORDS_KEY, JSON.stringify(finalShared)); }
-      catch { setStorageWarning(`Couldn't save the shared curriculum (${finalShared.length.toLocaleString()} words) — the browser's storage is full.`); }
+      persistShared(finalShared);
 
       return finalShared;
     });
@@ -1029,7 +1083,8 @@ export function useVocabulary(dataKeyPrefix?: string) {
     if (scope === 'all') setManualWords([]);
     setSharedContent([]);
     setSharedProgress({});
-    try { localStorage.removeItem(GS_WORDS_KEY); } catch { /* ignore */ }
+    idbDelete(GS_WORDS_KEY).catch(() => {});
+    sharedChannelRef.current?.postMessage({ type: 'shared-updated' });
     return { removed: removedCount };
   }, [manualWords, sharedContent]);
 
@@ -1058,6 +1113,11 @@ export function useVocabulary(dataKeyPrefix?: string) {
     // still needs the built-in default word bank seeded in — see
     // src/data/defaultVocabulary.json and the seeding effect in App.tsx.
     sharedWordCount: sharedContent.length,
+    // True once the async IndexedDB load (see effect above) has resolved —
+    // lets callers (e.g. the seeding effect in App.tsx) tell "genuinely no
+    // curriculum yet" apart from "hasn't finished loading yet" so they
+    // don't seed on top of data that just hasn't arrived from IndexedDB.
+    sharedLoaded,
     addWord,
     updateWord,
     deleteWord,
