@@ -479,6 +479,31 @@ export function useVocabulary(dataKeyPrefix?: string) {
   const [manualWords, setManualWords] = useState<VocabularyWord[]>(() => getInitialSplit().manual);
   const [sharedContent, setSharedContent] = useState<VocabularyWord[]>(() => getInitialSplit().shared);
   const [sharedLoaded, setSharedLoaded] = useState(false);
+
+  // ── The base curriculum — bundled in the app's code, no storage at all ───
+  // src/data/defaultVocabulary.json ships with the full curated word
+  // database (10,000+ CEFR-tagged words). It is NEVER written to
+  // localStorage or IndexedDB — it's loaded straight from the deployed
+  // app bundle into memory each session via a dynamic import (its own
+  // separate ~MB-scale chunk, fetched only after mount so it never blocks
+  // first paint), exactly like reading a file that's just part of the
+  // code. Nothing to seed, migrate, sync, or run out of quota for — it's
+  // simply always there, on every device, offline or online, the moment
+  // the app itself has loaded. Every word has a STABLE id baked into the
+  // JSON at build time (not generated at runtime), so this learner's own
+  // per-word progress (sharedProgress, below) reliably lines up with the
+  // same word across reloads, rebuilds, and redeploys.
+  const [baseWords, setBaseWords] = useState<VocabularyWord[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    import('@/data/defaultVocabulary.json').then((mod) => {
+      if (cancelled) return;
+      const raw = (mod as { default?: unknown }).default ?? mod;
+      if (Array.isArray(raw)) setBaseWords(sanitizeWords(raw));
+    }).catch(() => {/* base curriculum chunk failed to load — non-fatal, app still works with any manual/synced words */});
+    return () => { cancelled = true; };
+  }, []);
+
   const [sharedProgress, setSharedProgress] = useState<Record<string, Partial<VocabularyWord> & { hidden?: boolean }>>(() =>
     loadFromStorage<Record<string, Partial<VocabularyWord> & { hidden?: boolean }>>(KEYS.words + '_progress', {})
   );
@@ -576,7 +601,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
   // view (via deleteWord on a shared word — see below) is filtered out here
   // without touching the shared curriculum itself.
   const words = useMemo(() => {
-    const overlaidShared = sharedContent
+    const applyOverlay = (list: VocabularyWord[]) => list
       .filter(w => !sharedProgress[w.id]?.hidden)
       .map(w => {
         const p = sharedProgress[w.id];
@@ -584,8 +609,15 @@ export function useVocabulary(dataKeyPrefix?: string) {
         const { hidden: _hidden, ...progressFields } = p;
         return { ...w, ...progressFields };
       });
-    return [...manualWords, ...overlaidShared];
-  }, [manualWords, sharedContent, sharedProgress]);
+    // baseWords (the ~10,000+ word curriculum bundled directly into the
+    // app's code — see the load effect above) and sharedContent (extra
+    // words an admin has synced/imported on top, stored in IndexedDB) are
+    // two separate layers, but both get the exact same per-learner
+    // progress overlay (starred/learned/study counts, keyed by word id —
+    // baseWords use stable ids baked into the JSON file itself specifically
+    // so this overlay never breaks across reloads or rebuilds).
+    return [...manualWords, ...applyOverlay(baseWords), ...applyOverlay(sharedContent)];
+  }, [manualWords, baseWords, sharedContent, sharedProgress]);
 
   // Surfaces failures that saveToStorage used to only console.error — most
   // importantly a quota-exceeded save, which could otherwise fail
@@ -1113,6 +1145,10 @@ export function useVocabulary(dataKeyPrefix?: string) {
     // still needs the built-in default word bank seeded in — see
     // src/data/defaultVocabulary.json and the seeding effect in App.tsx.
     sharedWordCount: sharedContent.length,
+    // Size of the bundled, storage-free base curriculum (10,000+ words
+    // shipped directly in the app's code) — separate from sharedWordCount,
+    // which is only the extra words an admin has synced/imported on top.
+    baseWordCount: baseWords.length,
     // True once the async IndexedDB load (see effect above) has resolved —
     // lets callers (e.g. the seeding effect in App.tsx) tell "genuinely no
     // curriculum yet" apart from "hasn't finished loading yet" so they

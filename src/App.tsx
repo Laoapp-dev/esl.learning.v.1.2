@@ -9,7 +9,6 @@ import { Sidebar } from '@/components/Sidebar';
 import { MobileNav } from '@/components/MobileNav';
 import { ToastContainer } from '@/components/ToastContainer';
 import { AuthPage } from '@/pages/AuthPage';
-import type { VocabularyWord } from '@/types/vocabulary';
 
 // ── Lazy-loaded pages ────────────────────────────────────────────────────────
 // Every page below is its own separate JS chunk, loaded on demand instead of
@@ -100,62 +99,14 @@ function AppInner() {
 
   }, [isAuthenticated, currentUser?.id]); // eslint-disable-line
 
-  // ── Seed the built-in word bank ───────────────────────────────────────────
-  // src/data/defaultVocabulary.json ships with a curated, CEFR-tagged
-  // starter curriculum organized into 16 topic categories (People/Family,
-  // Time & Sequences, Food & Drink, Places & Locations, Common Actions/
-  // Verbs, Body & Health, Money & Commerce, Work/Study/Technology, Weather
-  // & Nature, Describing People, Agriculture & Farming, Forestry & Land
-  // Management, Environment & Ecology, Climate & Atmospheric Dynamics,
-  // Economy & Finance, Policy & Governance) so every Category lesson has
-  // real words in it from the moment the app is installed — no admin setup
-  // required first. An admin's own CSV/JSON import or Google Sheet sync
-  // always takes priority: this only runs once, the very first time a
-  // browser's shared curriculum is empty, and never overwrites anything.
-  //
-  // Loaded via a dynamic import (its own separate ~1.7MB chunk, fetched
-  // only after login) so it never becomes part of the initial bundle the
-  // browser has to download before the app can render — that keeps first
-  // paint fast even on slow connections. The merge itself is chunked into
-  // small batches on a timer (not one big synchronous pass) so it can
-  // never block the main thread long enough to feel like a freeze, and
-  // every step is wrapped so a failure here can only skip the seeding —
-  // it can never crash the app.
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    if (!vocabulary.sharedLoaded) return; // wait for the real IndexedDB load to resolve first
-    if (vocabulary.sharedWordCount > 0) return;
-    let cancelled = false;
-
-    import('@/data/defaultVocabulary.json')
-      .then((mod) => {
-        if (cancelled) return;
-        const all = ((mod as { default?: unknown }).default ?? mod) as unknown;
-        if (!Array.isArray(all) || all.length === 0) return;
-
-        const BATCH_SIZE = 500;
-        let i = 0;
-        const seedNextBatch = () => {
-          if (cancelled) return;
-          try {
-            const batch = all.slice(i, i + BATCH_SIZE);
-            if (batch.length > 0) {
-              vocabulary.mergeSharedWords(batch as Partial<VocabularyWord>[], 'shared');
-            }
-          } catch {
-            /* one bad batch should never stop the rest, or crash the app */
-          }
-          i += BATCH_SIZE;
-          if (i < all.length && !cancelled) {
-            setTimeout(seedNextBatch, 0);
-          }
-        };
-        seedNextBatch();
-      })
-      .catch(() => {/* built-in word bank unavailable — non-fatal, app still works empty until an admin imports */});
-
-    return () => { cancelled = true; };
-  }, [isAuthenticated, vocabulary.sharedLoaded, vocabulary.sharedWordCount]); // eslint-disable-line
+  // NOTE: the base curriculum (src/data/defaultVocabulary.json, 10,000+
+  // words) is no longer seeded/merged into the shared curriculum store
+  // here. useVocabulary.ts now loads it directly as its own always-present
+  // layer, purely in memory — no localStorage, no IndexedDB, nothing to
+  // seed or migrate. See the `baseWords` state and load effect there.
+  // Admin CSV/JSON import and Google Sheet sync still work exactly as
+  // before, as an ADDITIONAL layer on top (stored in IndexedDB) for any
+  // extra/custom words an admin wants beyond the bundled base curriculum.
 
   // Reset prevAuthRef when user logs out
   useEffect(() => {
