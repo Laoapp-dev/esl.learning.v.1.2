@@ -318,7 +318,7 @@ export function Settings() {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">About</p>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">App Version</span>
-          <span className="font-medium text-foreground">2.0.0</span>
+          <span className="font-medium text-foreground">{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '2.0.0'}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Words in library</span>

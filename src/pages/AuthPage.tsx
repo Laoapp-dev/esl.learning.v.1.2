@@ -39,7 +39,7 @@ function Mascot() {
       {/* Owl-style mascot using emoji + glow ring */}
       <div className="relative">
         <div className="w-20 h-20 rounded-[28px] overflow-hidden shadow-xl ring-2 ring-white/30">
-          <img src="./icons/icon-512.png" alt="ESL Learning owl" className="w-full h-full object-cover" />
+          <img src="./icons/icon-512.png" alt="ESL Master Vocab owl" className="w-full h-full object-cover" />
         </div>
         {/* XP glow ring */}
         <div className="absolute -inset-1 rounded-[32px] border-2 border-white/20 animate-pulse-slow" />
@@ -101,7 +101,7 @@ export function AuthPage() {
             <Mascot />
             <div className="text-center">
               <h1 className="text-3xl font-black text-white tracking-tight font-display">
-                ESL Learning
+                ESL Master Vocab
               </h1>
               <p className="text-white/80 text-sm font-medium mt-0.5">
                 Learn English · Level Up · Have Fun
@@ -263,7 +263,7 @@ export function AuthPage() {
           repo access. If this doesn't change after a deploy, the browser is
           serving a cached build, not the new one (see MIGRATION_GUIDE.md). */}
       <p className="text-center text-[10px] text-muted-foreground/50 mt-2">
-        build {typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__.replace('T', ' ').slice(0, 16) + ' UTC' : 'dev'}
+        v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '?'} · build {typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__.replace('T', ' ').slice(0, 16) + ' UTC' : 'dev'}
       </p>
     </div>
   );
